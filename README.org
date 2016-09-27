@@ -1,0 +1,13 @@
+* Simpleserver - A go replacement for SimpleHTTPServer
+
+Instead of
+#+BEGIN_SRC sh
+python -m http.server
+#+END_SRC
+
+Just use
+#+BEGIN_SRC
+simpleserver
+#+END_SRC
+
+Thats it! You now have a directory listing webserver running.
