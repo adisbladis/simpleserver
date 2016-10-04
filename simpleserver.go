@@ -2,7 +2,7 @@
 package main
 
 import (
-	"bufio"
+	"flag"
 	"fmt"
 	"html"
 	"io"
@@ -12,22 +12,23 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 )
 
-var (
-	RequestLog *log.Logger
-)
+var RequestLog *log.Logger
+var allowUploads *bool
 
 func reqHandler(w http.ResponseWriter, r *http.Request) {
-	cwd, _ := os.Getwd()
-	filePath := filepath.Join(cwd, r.URL.Path)
-	filePath, fpErr := filepath.EvalSymlinks(filePath)
-	if fpErr != nil {
-		log.Println(fpErr)
+	if !*allowUploads && r.Method == "POST" {
+		http.Error(w, "Uploads not allowed", http.StatusForbidden)
+		log.Println("Uploads not allowed")
 		return
 	}
 
+	cwd, _ := os.Getwd()
+	filePath := filepath.Join(cwd, r.URL.Path)
 	if strings.HasPrefix(filePath, cwd) == false {
 		log.Println("Trying to access dir outside of cwd")
 		return
@@ -35,14 +36,16 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 
 	statInfo, statErr := os.Stat(filePath)
 	if statErr != nil {
+		http.NotFound(w, r)
 		log.Println(statErr)
 		return
 	}
 
 	RequestLog.Println(r.RemoteAddr, fmt.Sprintf("\"%s %s %s\"", r.Method, r.URL, r.Proto))
-	if statInfo.IsDir() {
+	if r.Method == "GET" && statInfo.IsDir() {
 		files, readErr := ioutil.ReadDir(filePath)
 		if readErr != nil {
+			http.Error(w, "Directory read error", http.StatusInternalServerError)
 			log.Println(readErr)
 			return
 		}
@@ -56,47 +59,67 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 			"<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">\n"+
 			fmt.Sprintf("<title>%s</title>\n", dirlistTitle)+
 			"</head>\n<body>\n"+
-			fmt.Sprintf("<h1>%s</h1>\n<hr />\n", dirlistTitle)+
-			"<ul>\n")
+			fmt.Sprintf("<h1 style=\"display: inline-block;\">%s</h1>\n", dirlistTitle))
+		if *allowUploads {
+			fmt.Fprintf(w, fmt.Sprintf("<form action=\"%s\" method=\"post\" enctype=\"multipart/form-data\">\n", r.URL.Path)+
+				"<label for=\"file\">Upload file: </label>\n"+
+				"<input type=\"file\" name=\"file\">\n"+
+				"<input type=\"submit\" value=\"Submit\" />\n</form>\n")
+		}
+		fmt.Fprintf(w, "<hr />\n<ul>\n")
 
-		listFmt := "\t<li><a href=\"%s\">..</a></li>\n"
+		listFmt := "<li>\n<a href=\"%s\">..</a>\n</li>\n"
 		fmt.Fprintf(w, listFmt, filepath.Dir(r.URL.Path))
 		for _, f := range files {
 			fFull := html.EscapeString(filepath.Join(r.URL.Path, f.Name()))
-			fmt.Fprintf(w, "\t<li><a href=\"%s\">%s</a></li>\n", fFull, f.Name())
+			fmt.Fprintf(w, "<li>\n<a href=\"%s\">%s</a>\n</li>\n", fFull, f.Name())
 		}
 
 		fmt.Fprintf(w, "</ul>\n<hr />\n</body>\n</html>")
 
-	} else {
+	} else if r.Method == "GET" {
 		mimeType := mime.TypeByExtension(filepath.Ext(filePath))
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
 		}
 		w.Header().Set("Content-Type", mimeType)
+		w.Header().Set("Content-Length", strconv.FormatInt(statInfo.Size(), 10))
 
 		file, err := os.Open(filePath)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-
-		r := bufio.NewReader(file)
-		buf := make([]byte, 1024)
-		for {
-			l, err := r.Read(buf)
-			if err != nil && err != io.EOF {
-				panic(err)
-			}
-
-			if l == 0 {
-				break
-			}
-
-			if _, err := w.Write(buf[:l]); err != nil {
-				panic(err)
-			}
+		defer file.Close()
+		io.Copy(w, file)
+	} else if r.Method == "POST" {
+		if !statInfo.IsDir() {
+			http.Error(w, "Cant upload to non-directory file", http.StatusForbidden)
+			log.Println("Cannot upload to non-directory file")
+			return
 		}
+
+		r.ParseMultipartForm(15485760)
+		formFile, handler, err := r.FormFile("file")
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		defer formFile.Close()
+
+		f, err := os.OpenFile(filepath.Join(filePath, handler.Filename),
+			os.O_WRONLY|os.O_CREATE, 0666)
+		if err != nil {
+			http.Error(w, "Cannot write file", http.StatusForbidden)
+			fmt.Println(err)
+			return
+		}
+		defer f.Close()
+
+		io.Copy(f, formFile)
+		http.Redirect(w, r, r.URL.Path, 302)
+	} else {
+		http.Error(w, "Unhandled request", http.StatusBadRequest)
 	}
 }
 
@@ -105,6 +128,18 @@ func main() {
 		"REQ: ",
 		log.Ldate|log.Ltime)
 
+	err := syscall.Chroot(".")
+	if err != nil {
+		panic(err)
+	}
+
+	allowUploads = flag.Bool("allow-uploads", false, "Allow uploading of files")
+	listenPort := flag.Int("port", 8000, "Listen on port (default 8000)")
+	flag.Parse()
+
 	http.HandleFunc("/", reqHandler)
-	http.ListenAndServe(":8000", nil)
+	err = http.ListenAndServe(fmt.Sprintf(":%d", *listenPort), nil)
+	if err != nil {
+		panic(err)
+	}
 }
