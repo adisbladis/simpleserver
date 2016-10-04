@@ -11,3 +11,13 @@ simpleserver
 #+END_SRC
 
 Thats it! You now have a directory listing webserver running.
+
+Optionally you can allow upload (and get a form on the directory listings)
+#+BEGIN_SRC
+simpleserver -allow-uploads
+#+END_SRC
+
+And if you want to listen on another port
+#+BEGIN_SRC
+simpleserver -port 9001
+#+END_SRC
