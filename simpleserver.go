@@ -132,7 +132,7 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 		io.Copy(w, file)
 	} else if r.Method == "POST" {
 		if !statInfo.IsDir() {
-			http.Error(w, "Cant upload to non-directory file", http.StatusForbidden)
+			http.Error(w, "Cannot upload to non-directory file", http.StatusForbidden)
 			log.Println("Cannot upload to non-directory file")
 			return
 		}
@@ -145,8 +145,13 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer formFile.Close()
 
-		f, err := os.OpenFile(filepath.Join(filePath, handler.Filename),
-			os.O_WRONLY|os.O_CREATE, 0666)
+		outFilePath := filepath.Join(filePath, handler.Filename)
+		if _, err := os.Stat("/path/to/whatever"); err == nil {
+			http.Error(w, "File already exists", http.StatusForbidden)
+			log.Println("File already exists")
+			return
+		}
+		f, err := os.OpenFile(outFilePath, os.O_WRONLY|os.O_CREATE, 0666)
 		if err != nil {
 			http.Error(w, "Cannot write file", http.StatusForbidden)
 			fmt.Println(err)
