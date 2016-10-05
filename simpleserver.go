@@ -36,7 +36,7 @@ static int dropAllCaps(void) {
         return errno;
     }
 
-    if (cap_set_proc(state)) {
+    if (cap_set_proc(state) == -1) {
         cap_free(state);
         return errno;
     }
