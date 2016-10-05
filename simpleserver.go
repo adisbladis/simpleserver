@@ -17,8 +17,46 @@ import (
 	"syscall"
 )
 
+/*
+#cgo LDFLAGS: -lcap
+#include <sys/capability.h>
+#include <errno.h>
+
+static int dropAllCaps(void) {
+    cap_t state;
+
+    state = cap_init();
+    if (!state) {
+        cap_free(state);
+    }
+
+
+    if (cap_clear(state) < 0) {
+        cap_free(state);
+        return errno;
+    }
+
+    if (cap_set_proc(state)) {
+        cap_free(state);
+        return errno;
+    }
+
+    cap_free(state);
+    return 0;
+}
+*/
+import "C"
+
 var RequestLog *log.Logger
 var allowUploads *bool
+
+func dropAllCaps() (err error) {
+	errno := C.dropAllCaps()
+	if errno != 0 {
+		return syscall.Errno(errno)
+	}
+	return
+}
 
 func reqHandler(w http.ResponseWriter, r *http.Request) {
 	if !*allowUploads && r.Method == "POST" {
@@ -129,6 +167,10 @@ func main() {
 		log.Ldate|log.Ltime)
 
 	err := syscall.Chroot(".")
+	if err != nil {
+		panic(err)
+	}
+	err = dropAllCaps()
 	if err != nil {
 		panic(err)
 	}
