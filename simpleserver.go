@@ -185,6 +185,7 @@ func main() {
 	flag.Parse()
 
 	http.HandleFunc("/", reqHandler)
+	fmt.Println("Listening on port", *listenPort)
 	err = http.ListenAndServe(fmt.Sprintf(":%d", *listenPort), nil)
 	if err != nil {
 		panic(err)
