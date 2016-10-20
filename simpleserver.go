@@ -128,7 +128,12 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println(err)
 			return
 		}
-		defer file.Close()
+		defer func() {
+			err := file.Close()
+			if err != nil {
+				panic(err)
+			}
+		}()
 
 		_, err = io.Copy(w, file)
 		if err != nil {
@@ -153,7 +158,12 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 			fmt.Println(err)
 			return
 		}
-		defer formFile.Close()
+		defer func() {
+			err := formFile.Close()
+			if err != nil {
+				panic(err)
+			}
+		}()
 
 		outFilePath := filepath.Join(filePath, handler.Filename)
 		if _, err := os.Stat(outFilePath); err == nil {
@@ -167,7 +177,12 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 			fmt.Println(err)
 			return
 		}
-		defer f.Close()
+		defer func() {
+			err := f.Close()
+			if err != nil {
+				panic(err)
+			}
+		}()
 
 		_, err = io.Copy(f, formFile)
 		if err != nil {
