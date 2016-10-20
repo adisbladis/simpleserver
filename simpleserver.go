@@ -47,7 +47,7 @@ static int dropAllCaps(void) {
 */
 import "C"
 
-var RequestLog *log.Logger
+var requestLog *log.Logger
 var allowUploads *bool
 
 func dropAllCaps() (err error) {
@@ -79,7 +79,7 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	RequestLog.Println(r.RemoteAddr, fmt.Sprintf("\"%s %s %s\"", r.Method, r.URL, r.Proto))
+	requestLog.Println(r.RemoteAddr, fmt.Sprintf("\"%s %s %s\"", r.Method, r.URL, r.Proto))
 	if r.Method == "GET" && statInfo.IsDir() {
 		files, readErr := ioutil.ReadDir(filePath)
 		if readErr != nil {
@@ -129,7 +129,13 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer file.Close()
-		io.Copy(w, file)
+
+		_, err = io.Copy(w, file)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
 	} else if r.Method == "POST" {
 		if !statInfo.IsDir() {
 			http.Error(w, "Cannot upload to non-directory file", http.StatusForbidden)
@@ -137,7 +143,11 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		r.ParseMultipartForm(15485760)
+		err := r.ParseMultipartForm(15485760)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 		formFile, handler, err := r.FormFile("file")
 		if err != nil {
 			fmt.Println(err)
@@ -146,7 +156,7 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 		defer formFile.Close()
 
 		outFilePath := filepath.Join(filePath, handler.Filename)
-		if _, err := os.Stat("/path/to/whatever"); err == nil {
+		if _, err := os.Stat(outFilePath); err == nil {
 			http.Error(w, "File already exists", http.StatusForbidden)
 			log.Println("File already exists")
 			return
@@ -159,7 +169,11 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer f.Close()
 
-		io.Copy(f, formFile)
+		_, err = io.Copy(f, formFile)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 		http.Redirect(w, r, r.URL.Path, 302)
 	} else {
 		http.Error(w, "Unhandled request", http.StatusBadRequest)
@@ -167,7 +181,7 @@ func reqHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	RequestLog = log.New(os.Stdout,
+	requestLog = log.New(os.Stdout,
 		"REQ: ",
 		log.Ldate|log.Ltime)
 
