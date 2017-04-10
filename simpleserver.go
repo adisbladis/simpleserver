@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -216,19 +217,26 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	err = dropAllCaps()
-	if err != nil {
-		panic(err)
-	}
 
 	allowUploads = flag.Bool("allow-uploads", false, "Allow uploading of files")
 	listenPort := flag.Int("port", 8000, "Listen on port (default 8000)")
 	flag.Parse()
 
-	http.HandleFunc("/", reqHandler)
-	fmt.Println("Listening on port", *listenPort)
-	err = http.ListenAndServe(fmt.Sprintf(":%d", *listenPort), nil)
+	l, err := net.Listen("tcp", fmt.Sprintf(":%d", *listenPort))
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println("Listening on port", *listenPort)
+
+	err = dropAllCaps()
+	if err != nil {
+		panic(err)
+	}
+
+	http.HandleFunc("/", reqHandler)
+	err = http.Serve(l, nil)
+	if err != nil {
+		panic(err)
+	}
+
 }
