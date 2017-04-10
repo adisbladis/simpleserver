@@ -1,16 +1,22 @@
-// Copyright (C) 2016 Adam Hose adis@blad.is
+// Copyright (C) 2017 Adam Hose adis@blad.is
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
 
-//         http://www.apache.org/licenses/LICENSE-2.0
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 package main
 
 import (
@@ -20,12 +26,10 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
-	"mime"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -60,9 +64,6 @@ static int dropAllCaps(void) {
 */
 import "C"
 
-var requestLog *log.Logger
-var allowUploads *bool
-
 func dropAllCaps() (err error) {
 	errno := C.dropAllCaps()
 	if errno != 0 {
@@ -71,140 +72,129 @@ func dropAllCaps() (err error) {
 	return
 }
 
-func reqHandler(w http.ResponseWriter, r *http.Request) {
-	if !*allowUploads && r.Method == "POST" {
-		http.Error(w, "Uploads not allowed", http.StatusForbidden)
-		log.Println("Uploads not allowed")
+var requestLog *log.Logger
+var allowUploads *bool
+
+func listDir(filePath string, w http.ResponseWriter, r *http.Request) {
+	files, readErr := ioutil.ReadDir(filePath)
+	if readErr != nil {
+		http.Error(w, "Directory read error", http.StatusInternalServerError)
+		log.Println(readErr)
 		return
 	}
 
-	cwd, _ := os.Getwd()
-	filePath := filepath.Join(cwd, r.URL.Path)
-	if strings.HasPrefix(filePath, cwd) == false {
-		log.Println("Trying to access dir outside of cwd")
+	w.Header().Set("Content-Type", "text/html")
+	dirlistTitle := fmt.Sprintf("Directory listing for %s", r.URL.Path)
+
+	fmt.Fprintf(w, "<!DOCTYPE html>\n"+
+		"<html>\n"+
+		"<head>\n"+
+		"<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">\n"+
+		fmt.Sprintf("<title>%s</title>\n", dirlistTitle)+
+		"</head>\n<body>\n"+
+		fmt.Sprintf("<h1 style=\"display: inline-block;\">%s</h1>\n", dirlistTitle))
+	if *allowUploads {
+		fmt.Fprintf(w, fmt.Sprintf("<form action=\"%s\" method=\"post\" enctype=\"multipart/form-data\">\n", r.URL.Path)+
+			"<label for=\"file\">Upload file: </label>\n"+
+			"<input type=\"file\" name=\"file\">\n"+
+			"<input type=\"submit\" value=\"Submit\" />\n</form>\n")
+	}
+	fmt.Fprintf(w, "<hr />\n<ul>\n")
+
+	listFmt := "<li>\n<a href=\"%s\">..</a>\n</li>\n"
+	fmt.Fprintf(w, listFmt, filepath.Dir(r.URL.Path))
+	for _, f := range files {
+		fFull := html.EscapeString(filepath.Join(r.URL.Path, f.Name()))
+		fmt.Fprintf(w, "<li>\n<a href=\"%s\">%s</a>\n</li>\n", fFull, f.Name())
+	}
+
+	fmt.Fprintf(w, "</ul>\n<hr />\n</body>\n</html>")
+}
+
+func uploadFile(statInfo os.FileInfo, filePath string, w http.ResponseWriter, r *http.Request) {
+	if !statInfo.IsDir() {
+		http.Error(w, "Cannot upload to non-directory file", http.StatusForbidden)
+		log.Println("Cannot upload to non-directory file")
 		return
 	}
 
-	statInfo, statErr := os.Stat(filePath)
-	if statErr != nil {
-		http.NotFound(w, r)
-		log.Println(statErr)
+	err := r.ParseMultipartForm(15485760)
+	if err != nil {
+		log.Println(err)
 		return
 	}
-
-	requestLog.Println(r.RemoteAddr, fmt.Sprintf("\"%s %s %s\"", r.Method, r.URL, r.Proto))
-	if r.Method == "GET" && statInfo.IsDir() {
-		files, readErr := ioutil.ReadDir(filePath)
-		if readErr != nil {
-			http.Error(w, "Directory read error", http.StatusInternalServerError)
-			log.Println(readErr)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/html")
-		dirlistTitle := fmt.Sprintf("Directory listing for %s", r.URL.Path)
-
-		fmt.Fprintf(w, "<!DOCTYPE html>\n"+
-			"<html>\n"+
-			"<head>\n"+
-			"<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">\n"+
-			fmt.Sprintf("<title>%s</title>\n", dirlistTitle)+
-			"</head>\n<body>\n"+
-			fmt.Sprintf("<h1 style=\"display: inline-block;\">%s</h1>\n", dirlistTitle))
-		if *allowUploads {
-			fmt.Fprintf(w, fmt.Sprintf("<form action=\"%s\" method=\"post\" enctype=\"multipart/form-data\">\n", r.URL.Path)+
-				"<label for=\"file\">Upload file: </label>\n"+
-				"<input type=\"file\" name=\"file\">\n"+
-				"<input type=\"submit\" value=\"Submit\" />\n</form>\n")
-		}
-		fmt.Fprintf(w, "<hr />\n<ul>\n")
-
-		listFmt := "<li>\n<a href=\"%s\">..</a>\n</li>\n"
-		fmt.Fprintf(w, listFmt, filepath.Dir(r.URL.Path))
-		for _, f := range files {
-			fFull := html.EscapeString(filepath.Join(r.URL.Path, f.Name()))
-			fmt.Fprintf(w, "<li>\n<a href=\"%s\">%s</a>\n</li>\n", fFull, f.Name())
-		}
-
-		fmt.Fprintf(w, "</ul>\n<hr />\n</body>\n</html>")
-
-	} else if r.Method == "GET" {
-		mimeType := mime.TypeByExtension(filepath.Ext(filePath))
-		if mimeType == "" {
-			mimeType = "application/octet-stream"
-		}
-		w.Header().Set("Content-Type", mimeType)
-		w.Header().Set("Content-Length", strconv.FormatInt(statInfo.Size(), 10))
-
-		file, err := os.Open(filePath)
+	formFile, handler, err := r.FormFile("file")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() {
+		err := formFile.Close()
 		if err != nil {
-			log.Println(err)
-			return
+			panic(err)
 		}
-		defer func() {
-			err := file.Close()
-			if err != nil {
-				panic(err)
-			}
-		}()
+	}()
 
-		_, err = io.Copy(w, file)
+	outFilePath := filepath.Join(filePath, handler.Filename)
+	if _, err := os.Stat(outFilePath); err == nil {
+		http.Error(w, "File already exists", http.StatusForbidden)
+		log.Println("File already exists")
+		return
+	}
+	f, err := os.OpenFile(outFilePath, os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		http.Error(w, "Cannot write file", http.StatusForbidden)
+		fmt.Println(err)
+		return
+	}
+	defer func() {
+		err := f.Close()
 		if err != nil {
-			log.Println(err)
+			panic(err)
+		}
+	}()
+
+	_, err = io.Copy(f, formFile)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	http.Redirect(w, r, r.URL.Path, 302)
+
+}
+
+func handleWrapper(h http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		requestLog.Println(r.RemoteAddr, fmt.Sprintf("\"%s %s %s\"", r.Method, r.URL, r.Proto))
+
+		if !*allowUploads && r.Method == "POST" {
+			http.Error(w, "Uploads not allowed", http.StatusForbidden)
+			log.Println("Uploads not allowed")
 			return
 		}
 
-	} else if r.Method == "POST" {
-		if !statInfo.IsDir() {
-			http.Error(w, "Cannot upload to non-directory file", http.StatusForbidden)
-			log.Println("Cannot upload to non-directory file")
+		cwd, _ := os.Getwd()
+		filePath := filepath.Join(cwd, r.URL.Path)
+		if strings.HasPrefix(filePath, cwd) == false {
+			log.Println("Trying to access dir outside of cwd")
 			return
 		}
 
-		err := r.ParseMultipartForm(15485760)
-		if err != nil {
-			log.Println(err)
+		statInfo, statErr := os.Stat(filePath)
+		if statErr != nil {
+			http.NotFound(w, r)
+			log.Println(statErr)
 			return
 		}
-		formFile, handler, err := r.FormFile("file")
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		defer func() {
-			err := formFile.Close()
-			if err != nil {
-				panic(err)
-			}
-		}()
 
-		outFilePath := filepath.Join(filePath, handler.Filename)
-		if _, err := os.Stat(outFilePath); err == nil {
-			http.Error(w, "File already exists", http.StatusForbidden)
-			log.Println("File already exists")
-			return
+		if r.Method == "GET" && statInfo.IsDir() {
+			listDir(filePath, w, r)
+		} else if r.Method == "POST" {
+			uploadFile(statInfo, filePath, w, r)
+		} else {
+			h.ServeHTTP(w, r)
 		}
-		f, err := os.OpenFile(outFilePath, os.O_WRONLY|os.O_CREATE, 0666)
-		if err != nil {
-			http.Error(w, "Cannot write file", http.StatusForbidden)
-			fmt.Println(err)
-			return
-		}
-		defer func() {
-			err := f.Close()
-			if err != nil {
-				panic(err)
-			}
-		}()
-
-		_, err = io.Copy(f, formFile)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		http.Redirect(w, r, r.URL.Path, 302)
-	} else {
-		http.Error(w, "Unhandled request", http.StatusBadRequest)
 	}
 }
 
@@ -213,30 +203,25 @@ func main() {
 		"REQ: ",
 		log.Ldate|log.Ltime)
 
-	err := syscall.Chroot(".")
-	if err != nil {
-		panic(err)
-	}
-
 	allowUploads = flag.Bool("allow-uploads", false, "Allow uploading of files")
 	listenPort := flag.Int("port", 8000, "Listen on port (default 8000)")
 	flag.Parse()
+
+	err := syscall.Chroot(".")
+	if err != nil {
+		fmt.Println("Could not chroot, here be dragons")
+	}
 
 	l, err := net.Listen("tcp", fmt.Sprintf(":%d", *listenPort))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Listening on port", *listenPort)
 
 	err = dropAllCaps()
 	if err != nil {
 		panic(err)
 	}
 
-	http.HandleFunc("/", reqHandler)
-	err = http.Serve(l, nil)
-	if err != nil {
-		panic(err)
-	}
-
+	http.Handle("/", handleWrapper(http.FileServer(http.Dir("./"))))
+	http.Serve(l, nil)
 }
