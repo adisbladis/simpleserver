@@ -2,7 +2,7 @@ PREFIX=/usr/local
 LDFLAGS="-w -s"
 
 all:
-	go build -ldflags $(LDFLAGS) -o simpleserver simpleserver.go
+	go build -ldflags $(LDFLAGS) -o simpleserver
 
 install:
 	install -m 0755 simpleserver $(PREFIX)/bin

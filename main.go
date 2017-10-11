@@ -34,44 +34,6 @@ import (
 	"syscall"
 )
 
-/*
-#cgo LDFLAGS: -lcap
-#include <sys/capability.h>
-#include <errno.h>
-
-static int dropAllCaps(void) {
-    cap_t state;
-
-    state = cap_init();
-    if (!state) {
-        cap_free(state);
-    }
-
-
-    if (cap_clear(state) < 0) {
-        cap_free(state);
-        return errno;
-    }
-
-    if (cap_set_proc(state) == -1) {
-        cap_free(state);
-        return errno;
-    }
-
-    cap_free(state);
-    return 0;
-}
-*/
-import "C"
-
-func dropAllCaps() (err error) {
-	errno := C.dropAllCaps()
-	if errno != 0 {
-		return syscall.Errno(errno)
-	}
-	return
-}
-
 var requestLog *log.Logger
 var allowUploads *bool
 
@@ -217,7 +179,8 @@ func main() {
 		panic(err)
 	}
 
-	err = dropAllCaps()
+	// Drop POSIX capabilities, only works on linux
+	err = DropAllCaps()
 	if err != nil {
 		panic(err)
 	}
